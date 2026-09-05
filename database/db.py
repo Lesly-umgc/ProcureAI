@@ -1,0 +1,103 @@
+import os
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, Text, Enum, Date
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from pgvector.sqlalchemy import Vector
+from datetime import datetime
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://@localhost:5432/procureai_db")
+
+engine = create_engine(DATABASE_URL, pool_size=10, max_overflow=20)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+class Vendor(Base):
+    __tablename__ = "vendors"
+    
+    vendor_id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, index=True)
+    tax_id = Column(String(50), unique=True, index=True)
+    bank_account = Column(String(100))
+    address = Column(Text)
+    risk_rating = Column(Float, default=0.0)
+    embedding = Column(Vector(384))
+
+    purchase_orders = relationship("PurchaseOrder", back_populates="vendor")
+    invoices = relationship("Invoice", back_populates="vendor")
+
+class PurchaseOrder(Base):
+    __tablename__ = "purchase_orders"
+    
+    po_id = Column(Integer, primary_key=True, index=True)
+    po_number = Column(String(100), unique=True, index=True)
+    vendor_id = Column(Integer, ForeignKey("vendors.vendor_id"), index=True)
+    department_id = Column(String(50), index=True)
+    amount_limit = Column(Float, nullable=False)
+    status = Column(String(50), default="ACTIVE")
+    issue_date = Column(Date, nullable=False)
+
+    vendor = relationship("Vendor", back_populates="purchase_orders")
+    invoices = relationship("Invoice", back_populates="purchase_order")
+
+class Invoice(Base):
+    __tablename__ = "invoices"
+    
+    invoice_id = Column(Integer, primary_key=True, index=True)
+    invoice_number = Column(String(100), index=True)
+    vendor_id = Column(Integer, ForeignKey("vendors.vendor_id"), index=True)
+    po_id = Column(Integer, ForeignKey("purchase_orders.po_id"), index=True)
+    invoice_date = Column(Date, nullable=False)
+    subtotal = Column(Float, nullable=False)
+    tax_amount = Column(Float, nullable=False)
+    total_amount = Column(Float, nullable=False)
+    raw_text = Column(Text)
+    embedding = Column(Vector(384))
+    status = Column(String(50), default="PENDING")
+
+    vendor = relationship("Vendor", back_populates="invoices")
+    purchase_order = relationship("PurchaseOrder", back_populates="invoices")
+    line_items = relationship("InvoiceLineItem", back_populates="invoice", cascade="all, delete-orphan")
+    audit_log = relationship("AuditLog", back_populates="invoice", uselist=False, cascade="all, delete-orphan")
+
+class InvoiceLineItem(Base):
+    __tablename__ = "invoice_line_items"
+    
+    line_id = Column(Integer, primary_key=True, index=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.invoice_id"), index=True)
+    item_description = Column(Text, nullable=False)
+    quantity = Column(Float, nullable=False)
+    unit_price = Column(Float, nullable=False)
+    line_total = Column(Float, nullable=False)
+    category_code = Column(String(50), index=True)
+
+    invoice = relationship("Invoice", back_populates="line_items")
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    
+    audit_id = Column(Integer, primary_key=True, index=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.invoice_id"), unique=True, index=True)
+    anomaly_score = Column(Float, nullable=False)
+    risk_level = Column(String(50), index=True)
+    triggered_rules = Column(Text) # JSON stored as string or comma separated
+    agent_reasoning = Column(Text)
+    status = Column(String(50), default="REVIEWED")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    invoice = relationship("Invoice", back_populates="audit_log")
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
+    # Create IVFFlat vector indexes for similarity search
+    with engine.connect() as conn:
+        conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector;")
+        # Note: IVFFlat requires rows before indexing or can be created with lists=100
+        try:
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS vendors_embedding_idx ON vendors USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);")
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS invoices_embedding_idx ON invoices USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);")
+            conn.commit()
+        except Exception as e:
+            print(f"Index creation note (safe if tables empty): {e}")
+
+if __name__ == "__main__":
+    init_db()
+    print("Database initialized and DDL applied successfully.")
