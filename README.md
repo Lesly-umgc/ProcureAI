@@ -101,17 +101,10 @@ ProcureAI/
 ├── api/               # FastAPI async REST endpoints (/health, /metrics, /invoices, /audit/run)
 ├── dashboard/         # Streamlit executive compliance dashboard
 ├── scripts/           # 250K invoice hybrid data synthesis & demo walkthroughs
-├── resources/         # System architecture flowchart and PDF technical mastery guides
+├── resources/         # System architecture flowchart
 ├── requirements.txt   # Pinned Python dependencies
 └── README.md          # Project landing documentation
 ```
-
----
-
-## 📄 Technical Documentation
-Comprehensive 15-page architectural breakdowns and interview preparation guides are included in the repository:
-- [`resources/ProcureAI_Technical_Mastery_Guide.pdf`](resources/ProcureAI_Technical_Mastery_Guide.pdf)
-- [`resources/ProcureAI_Technical_Deep_Dive.pdf`](resources/ProcureAI_Technical_Deep_Dive.pdf)
 
 ---
 
