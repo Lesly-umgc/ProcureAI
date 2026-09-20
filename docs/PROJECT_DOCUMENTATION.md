@@ -158,7 +158,19 @@ structured invoice ──(FR-1 ✅)──► scripts/synthesize.py (shared deter
 | 1 | Initial agent | 60.0% (18/30), CI 42.3%–75.4% | 0.278 | 0 | FAIL |
 | 2 | Verdict rubric hardened; line items + vendor-master fields passed to agent; per-line price-drift checks; vendor/tax-ID verification | 66.7% (20/30), CI 48.8%–80.8% | 0.700 | 0 | FAIL |
 | 3 | Fixed real `verify_arithmetic` line-sum defect; duplicate originals added to history; clean/near-threshold/split-billing verdict guards | 70.0% (21/30), CI 52.1%–83.3% | 0.822 | 0 | FAIL |
-| 4 | Duplicates & split-billing → `FLAG` (heuristic ≠ certain fraud); all five tool calls mandatory before verdict | *running* | — | — | — |
+| 4 | Duplicates & split-billing → `FLAG` (heuristic ≠ certain fraud); all five tool calls mandatory before verdict | *aborted — quota* | — | 27 | — |
+| 4 (retry) | Same agent code; rerun after Gemini free-tier daily quota reset | *scheduled 2026-09-21 ~05:42 EDT* | — | — | — |
+
+Run 4 note (2026-09-20 15:36 EDT): the live run died on **API quota, not agent
+quality** — `gemini-3.5-flash-lite` returned HTTP 429 (quota exceeded) after 3
+invoices (2 OK, 1 miss), then the circuit breaker tripped; remaining 27
+invoices recorded as errors. The 6.7% partial output was a quota artifact, not
+a measurement, so `evals/agent_report.md` / `evals/agent_results.json` were
+restored to the run-3 result; the raw failed JSON is preserved at
+`workspace/goals/procureai-repo-ai-engineering-upgrade/hidden_files/run4_quota_failure_2026-09-20.json`.
+Auth for the run went through the secure `custom.google-gemini` connector via
+authd surrogates (`/tmp` launcher, now `~/workspace/run4_live_launcher.py`); no
+raw key was handled.
 
 Reviewer note: the evaluator reconstructs duplicate originals from each golden
 record's `duplicate_of` field (one day earlier). This makes detection testable but
