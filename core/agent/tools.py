@@ -78,7 +78,18 @@ def verify_arithmetic(invoice: Dict[str, Any], tax_rate: float = 0.08) -> Dict[s
     expected_tax = round(subtotal * tax_rate, 2)
     tax_ok = abs(expected_tax - tax) < 0.01
 
+    line_items = invoice.get("line_items", []) or []
+    lines_total = round(sum(float(l.get("line_total", 0)) for l in line_items), 2)
+    lines_ok = True
+    if line_items:
+        lines_ok = abs(lines_total - subtotal) < 0.01
+
     findings = []
+    if not lines_ok:
+        findings.append(
+            f"line items sum to ${lines_total:,.2f} but stated subtotal is "
+            f"${subtotal:,.2f} (discrepancy of ${subtotal - lines_total:,.2f})"
+        )
     if not total_ok:
         findings.append(
             f"total mismatch: subtotal ${subtotal:,.2f} + tax ${tax:,.2f} = "
@@ -91,10 +102,12 @@ def verify_arithmetic(invoice: Dict[str, Any], tax_rate: float = 0.08) -> Dict[s
             f"expected, but ${tax:,.2f} charged"
         )
     return {
-        "ok": total_ok and tax_ok,
+        "ok": total_ok and tax_ok and lines_ok,
         "expected_total": expected_total,
         "actual_total": total,
         "total_diff": round(total - expected_total, 2),
+        "lines_total": lines_total,
+        "lines_ok": lines_ok,
         "findings": findings,
     }
 

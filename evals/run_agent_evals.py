@@ -150,6 +150,26 @@ def golden_to_context(g: dict, all_golden: list) -> dict:
             "invoice_date": h["invoice_date"],
             "status": "FLAGGED" if h["fraud_type"] != "NORMAL" else "APPROVED",
         })
+    # Fidelity fix: duplicate invoices reference an ORIGINAL invoice
+    # (duplicate_of) that was billed before and must exist in the AP history —
+    # otherwise find_duplicates is tested on an impossible task. Reconstruct it
+    # from the golden record's own fields (same vendor/PO/amount, one day
+    # earlier). This is prior-system data, not the current invoice's label.
+    for h in all_golden:
+        if not h.get("duplicate_of"):
+            continue
+        orig_date = (
+            datetime.datetime.strptime(h["invoice_date"], "%Y-%m-%d")
+            - datetime.timedelta(days=1)
+        ).strftime("%Y-%m-%d")
+        history.append({
+            "invoice_id": h["duplicate_of"],
+            "vendor_id": h["vendor_name"],
+            "po_id": h["po_number"],
+            "total_amount": h["total_amount"],
+            "invoice_date": orig_date,
+            "status": "APPROVED",
+        })
     return {"invoice": invoice, "po": po, "vendor": vendor, "history": history}
 
 

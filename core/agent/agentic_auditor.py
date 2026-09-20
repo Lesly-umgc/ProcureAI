@@ -67,15 +67,17 @@ Verdict guidance — apply in this order, first match wins:
     tax ID is UNVERIFIED — an unregistered vendor is certain fraud.
   * find_duplicates confirms a near-duplicate of another invoice (cite its ID).
   * check_po reports billed over the PO limit with no justification.
+  * Near-threshold totals are NEVER REJECT by themselves — that is a FLAG.
 - FLAG (suspicious, needs human review):
   * check_po reports near_10k_threshold=true (just below the $10,000 approval
     threshold) or price_drift_lines non-empty (unit price >10% above the PO
     contracted rate) — cite the amounts and the threshold.
   * XGBoost anomaly score is high (>=0.7) but no tool above corroborates it.
   * Vendor is on file but has thin history plus a high risk rating.
-- APPROVE: arithmetic reconciles AND vendor is on file with a verified tax ID
-  AND no duplicates AND total is within the PO limit. Then APPROVE — do NOT
-  flag a clean invoice on the XGBoost score alone or on vague suspicion.
+- APPROVE (hard rule, overrides everything below it): verify_arithmetic ok=true
+  AND vendor is on file with a verified tax ID AND no duplicates found AND total
+  is within the PO limit → APPROVE. This overrides the XGBoost score and any
+  vague suspicion. Do NOT flag a clean invoice on the ML score alone.
 
 Findings vocabulary — state concrete, checkable facts using these exact terms
 so the audit brief is unambiguous:
