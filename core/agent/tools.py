@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 import pandas as pd
 
 from core.anomaly_engine import AnomalyScoringEngine, FEATURE_COLUMNS
+from core.agent.retrieval import find_similar_invoices, retrieve_policy
 
 # ---------------------------------------------------------------------------
 # Shared engine (loaded once)
@@ -258,6 +259,20 @@ TOOLS = {
     "assess_vendor": (
         assess_vendor,
         "Assess vendor risk and ghost-vendor signals. Input: vendor dict, history list.",
+    ),
+    "find_similar_invoices": (
+        find_similar_invoices,
+        "Find the k most similar historical invoices via pgvector cosine search "
+        "(needs Postgres+pgvector; returns available=false when the DB is "
+        "unreachable). Input: invoice dict. Returns amounts, dates, seeded "
+        "statuses (FLAGGED/APPROVED) and cosine distances for comparison.",
+    ),
+    "retrieve_policy": (
+        retrieve_policy,
+        "Retrieve the most relevant policy snippets via pgvector cosine search "
+        "over the policies table (synthetic seed corpus; returns available=false "
+        "when the DB is unreachable). Input: invoice dict. Returns section "
+        "code, title, text, and covered fraud classes for citation.",
     ),
 }
 

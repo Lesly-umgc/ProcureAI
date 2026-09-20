@@ -35,11 +35,11 @@ headline metric or feature is stated without a rerunnable proof or an eval resul
 | FR-1 | Ingest 250,000 synthetic invoices with six fraud classes (`NORMAL`, `DUPLICATE`, `SPLIT_PO`, `PRICE_DRIFT`, `GHOST`, `CALC_DISCREPANCY`) via a single shared, deterministic generator | ✅ Done | `scripts/synthesize.py` |
 | FR-2 | Train an anomaly classifier on the dataset with ≥96% held-out accuracy | ✅ Done — **97.59%**, 0.88 ROC AUC | `proofs/prove_accuracy.py` |
 | FR-3 | Measure audit-preparation time reduction against a documented manual baseline | ✅ Done — **99.87%** reduction (automated wall-clock vs. assumed 4-minute manual baseline) | `proofs/prove_efficiency.py` |
-| FR-4 | Provide a ReAct agent that audits invoices with deterministic tools and emits a structured verdict | ✅ Done — 5 tools: `verify_arithmetic`, `find_duplicates`, `check_po`, `assess_vendor`, `score_invoice_xgb` | `core/agent/agentic_auditor.py`, `core/agent/tools.py` |
+| FR-4 | Provide a ReAct agent that audits invoices with deterministic tools and emits a structured verdict | ✅ Done — 7 tools: the 5 originals plus `find_similar_invoices` and `retrieve_policy` (pgvector) | `core/agent/agentic_auditor.py`, `core/agent/tools.py`, `core/agent/retrieval.py` |
 | FR-5 | Evaluate the agent on a fixed 30-invoice golden set with an 80% verdict-accuracy gate, where agent errors count as failures | 🟡 In progress — **70.0%** (21/30), CI 52.1%–83.3%, 0 errors | `evals/run_agent_evals.py`, `evals/agent_report.md` |
 | FR-6 | Serve audits through FastAPI REST endpoints and a Streamlit dashboard | 🟡 Partial — `api/main.py` and `dashboard/app.py` exist; agent integration not wired | Roadmap item 2 |
 | FR-7 | Record per-tool/LLM latency, call counts, tokens, and cost | ❌ Planned | Roadmap item 3 |
-| FR-8 | Add historical-invoice similarity + policy retrieval as a 6th agent tool backed by real pgvector | ❌ Planned | Roadmap item 4 |
+| FR-8 | Add historical-invoice similarity + policy retrieval as a 6th agent tool backed by real pgvector | ✅ Done 2026-09-20 (verified vs. live PostgreSQL 16 + pgvector 0.6.0) | §4.3 note below |
 | FR-9 | Provide pytest suite, GitHub Actions CI, Docker Compose, and reviewer setup docs | ❌ Planned | Roadmap item 5 |
 | FR-10 | Implement genuine LayoutLMv3 document understanding behind an off-by-default feature flag | ❌ Planned | Roadmap item 6 |
 
@@ -126,7 +126,7 @@ structured invoice ──(FR-1 ✅)──► scripts/synthesize.py (shared deter
 | `scripts/synthesize.py` | Deterministic 250K-invoice generator; single source of truth for DB loader, proofs, and evals. Implements real `DUPLICATE` (near-copy) and `GHOST` (high-risk-vendor) fraud. |
 | `core/anomaly_engine.py` | XGBoost training/scoring on production features. Bug fixed during this work: `tax_ratio` was computed differently at train vs. score time, blinding the model to calculation fraud. |
 | `core/agent/agentic_auditor.py` | ReAct audit loop over the toolset; emits structured JSON brief + verdict. |
-| `core/agent/tools.py` | Five deterministic tools (see §3.3). |
+| `core/agent/tools.py` | Seven tools: the five originals plus `find_similar_invoices` and `retrieve_policy` (registered; retrieval is *optional* in the mandatory sweep — see note below the eval ledger). |
 | `core/agent/llm_throttle.py` | Free-tier rate limiting and retries for Gemini 3.5 Flash Lite. |
 | `core/agent_auditor.py` | Legacy single-prompt auditor — kept as the honest baseline (56.7%). |
 | `proofs/prove_accuracy.py` | Rerunnable proof: 97.59% accuracy on held-out 250K-invoice split. |
@@ -135,7 +135,7 @@ structured invoice ──(FR-1 ✅)──► scripts/synthesize.py (shared deter
 | `evals/judge.py` | Deterministic mock judge (+ Gemini judge mode). |
 | `evals/run_agent_evals.py` | Hardened live eval runner; writes `evals/agent_report.md` + `evals/agent_results.json`. |
 | `evals/run_evals.py` | Legacy baseline eval runner. |
-| `database/db.py` | PostgreSQL + pgvector schema/index setup (similarity tooling pending, FR-8). |
+| `database/db.py` | PostgreSQL + pgvector schema/index setup; includes the `Policy` ORM model and `policies_embedding_idx` (FR-8 done 2026-09-20). |
 | `api/main.py`, `dashboard/app.py` | FastAPI/Streamlit scaffolds (agent integration pending, FR-6). |
 
 ### 4.2 How to reproduce the headline numbers
@@ -176,6 +176,21 @@ Reviewer note: the evaluator reconstructs duplicate originals from each golden
 record's `duplicate_of` field (one day earlier). This makes detection testable but
 is fixture construction from labels; a future revision should represent prior
 invoices explicitly in the dataset/history instead.
+
+pgvector tooling verification (2026-09-20, not part of the eval loop): FR-8 was
+implemented and verified against a **live PostgreSQL 16 + pgvector 0.6.0** —
+3,000 invoices re-embedded with real MiniLM-L6-v2 (384-dim, normalized),
+`policies` seeded with 8 explicitly-synthetic snippets (all 6 fraud classes).
+`find_similar_invoices` returns real neighbors with correctly sorted cosine
+distances; `retrieve_policy` cites the right policy (a DUPLICATE invoice pulled
+FIN-2.1 "Duplicate Invoice Detection" as a top hit); both degrade to
+`available: False` when the DB is unreachable, without crashing the audit.
+Honest limits: verification was on a 3,000-row subset (not the 250K load), and
+synthetic invoice text uses a fixed template so embeddings cluster tightly —
+rankings will be more discriminative on real varied invoice text. The two tools
+are registered but currently **optional** in the agent's mandatory 5-tool sweep
+(deliberate: mandatory retrieval would add LLM steps per invoice and burn free-tier
+quota); the decision is pending before the next live eval run.
 
 ---
 
@@ -243,24 +258,28 @@ produced it.
 
 ## 7. Future Aims (Roadmap)
 
-Sequenced; the eval loop closes first (user direction: *"we will not skip
-anything, we will fix"*).
+Sequenced.
 
-1. **Finish the eval loop** — pass the 80% verdict-accuracy gate on the live
-   agent, or reach a documented honest stop with remaining misses analyzed.
+1. **Finish the eval loop** — *parked per user direction 2026-09-20 ("come back
+   later")*: pass the 80% verdict-accuracy gate on the live agent, or reach a
+   documented honest stop with remaining misses analyzed. Run-4 retry is
+   scheduled for 2026-09-21 ~05:42 EDT after the free-tier quota reset; the
+   70.0% run-3 result stands as the current honest number until then.
 2. **Integrate `AuditAgent` into FastAPI and Streamlit** — wire the ReAct agent
    into `api/main.py` endpoints and `dashboard/app.py` views.
 3. **Tracing & instrumentation** — per-tool and per-LLM-call latency, call
    counts, token usage, and cost.
-4. **pgvector 6th tool** — real historical-invoice similarity and policy
-   retrieval inside the agent loop.
+4. ~~**pgvector 6th tool**~~ — **done and verified** 2026-09-20 against a live
+   PostgreSQL 16 + pgvector 0.6.0 (see §4.3 note). Open decision: keep retrieval
+   optional in the tool sweep, or make it mandatory before the next live eval
+   (quota cost tradeoff).
 5. **Engineering rigor** — pytest suite, GitHub Actions CI, Docker Compose,
    reviewer setup documentation (includes the §5.3 reference docs).
 6. **LayoutLMv3 behind a feature flag** — genuine document-understanding
    behavior, off by default, so the deterministic pipeline stays the default.
 
 Housekeeping (non-code): rotate the previously exposed Gemini API key, set the
-real GitHub git identity (currently a placeholder), push the 4 unpushed local
+real GitHub git identity (currently a placeholder), push the unpushed local
 commits.
 
 ---
@@ -271,5 +290,9 @@ commits.
   implemented real DUPLICATE + GHOST fraud; tuned XGBoost (500t/d6/lr0.05).
 - Built eval harness (golden set, judge, hardened runner) and legacy 56.7% baseline.
 - Built ReAct agent + 5 deterministic tools on Gemini 3.5 Flash Lite.
-- Calibration runs: 60.0% → 66.7% → 70.0% vs. 80% gate (run 4 in progress).
+- Calibration runs: 60.0% → 66.7% → 70.0% vs. 80% gate (run 4 aborted on API quota;
+  retry scheduled 2026-09-21 ~05:42 EDT; gate parked per user direction).
 - Wrote architecture before/after diagrams.
+- Implemented FR-8: real pgvector tools (`find_similar_invoices`, `retrieve_policy`)
+  as optional 6th/7th agent tools, verified end-to-end against live PostgreSQL 16 +
+  pgvector 0.6.0; seeded `policies` table with 8 explicitly-synthetic policy snippets.

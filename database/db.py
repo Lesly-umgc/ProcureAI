@@ -85,6 +85,23 @@ class AuditLog(Base):
 
     invoice = relationship("Invoice", back_populates="audit_log")
 
+class Policy(Base):
+    """Procurement policy snippets for agent policy retrieval.
+
+    SYNTHETIC SEED DATA -- seeded from policies/policies.json. These are
+    representative procurement-policy wordings used so the audit agent can
+    cite a policy behind its verdict; they are not any real company's policy.
+    """
+    __tablename__ = "policies"
+
+    policy_id = Column(Integer, primary_key=True, index=True)
+    section = Column(String(50), nullable=False, index=True)   # e.g. FIN-2.1
+    title = Column(String(255), nullable=False)
+    text = Column(Text, nullable=False)
+    fraud_classes = Column(Text)  # comma-separated, e.g. "DUPLICATE,SPLIT_PO"
+    embedding = Column(Vector(384))
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     # Create IVFFlat vector indexes for similarity search
@@ -94,6 +111,7 @@ def init_db():
         try:
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS vendors_embedding_idx ON vendors USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);")
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS invoices_embedding_idx ON invoices USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);")
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS policies_embedding_idx ON policies USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);")
             conn.commit()
         except Exception as e:
             print(f"Index creation note (safe if tables empty): {e}")

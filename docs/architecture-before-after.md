@@ -111,7 +111,17 @@ flowchart TD
 - [x] Prove the numbers (97.59% accuracy, 99.87% efficiency, 250K scale)
 - [x] Eval harness + baseline (legacy auditor: 56.7% — honest "before")
 - [x] Real ReAct agent (evaluating now)
-- [ ] pgvector similarity + policy retrieval wired into the agent
+- [x] pgvector similarity + policy retrieval wired into the agent
+  - ✅ **Done and verified 2026-09-20 against a live PostgreSQL 16 + pgvector 0.6.0.**
+  - New tools: `find_similar_invoices` (cosine search over real MiniLM-L6-v2
+    embeddings) and `retrieve_policy` (search over 8 synthetic, clearly-labeled
+    policy snippets covering all 6 fraud classes).
+  - Verified end-to-end: real rows returned, distances correctly sorted, graceful
+    degradation when the DB is unreachable.
+  - Honest limits: verified on a 3,000-row subset; synthetic invoice text is a
+    fixed template so embeddings cluster tightly (rankings need real varied text);
+    retrieval is currently *optional* in the agent's mandatory sweep (decision
+    pending before the next live eval, to protect API quota).
 - [ ] LayoutLMv3 document-AI path (or honest README correction)
 - [ ] Tracing, latency & cost per audit
 - [ ] pytest suite, GitHub Actions, Docker Compose
