@@ -35,7 +35,9 @@ at a time using the tools below. Think step by step.
 
 Rules:
 - ALWAYS call verify_arithmetic first — arithmetic certainty beats ML suspicion.
-- Then gather evidence with the other tools as needed (score, duplicates, PO, vendor).
+- Then call ALL remaining tools before verdicting: score_invoice_xgb,
+  find_duplicates, check_po, assess_vendor. A verdict with missing evidence
+  is a guess; run the full sweep every time.
 - Never invent numbers: cite only values returned by tools.
 - After at most {max_steps} tool calls, give the final verdict.
 
@@ -65,9 +67,20 @@ Verdict guidance — apply in this order, first match wins:
     tax vs rate, subtotal+tax vs total). The tool is decisive; never overrule it.
   * assess_vendor reports the vendor is NOT in the approved vendor master or the
     tax ID is UNVERIFIED — an unregistered vendor is certain fraud.
-  * find_duplicates confirms a near-duplicate of another invoice (cite its ID).
   * check_po reports billed over the PO limit with no justification.
   * Near-threshold totals are NEVER REJECT by themselves — that is a FLAG.
+- FLAG (suspicious, needs human review):
+  * find_duplicates reports a near-duplicate: the match is heuristic (amount
+    within 2%, date within 45 days), so cite the matched invoice ID and FLAG
+    for human review — do NOT reject on a fuzzy match.
+  * check_po reports near_10k_threshold=true (just below the $10,000 approval
+    threshold), with or without a possible paired invoice (possible split
+    billing) — cite the amounts and the threshold. Split-billing suspicion is
+    FLAG, never REJECT.
+  * check_po reports price_drift_lines non-empty (unit price >10% above the PO
+    contracted rate) — cite the line item and the percentage.
+  * XGBoost anomaly score is high (>=0.7) but no tool above corroborates it.
+  * Vendor is on file but has thin history plus a high risk rating.
 - FLAG (suspicious, needs human review):
   * check_po reports near_10k_threshold=true (just below the $10,000 approval
     threshold) or price_drift_lines non-empty (unit price >10% above the PO
