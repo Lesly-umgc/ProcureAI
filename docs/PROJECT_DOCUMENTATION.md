@@ -57,13 +57,16 @@ headline metric or feature is stated without a rerunnable proof or an eval resul
 
 ### 2.3 Known gaps between claims and implementation (honest ledger)
 
-The README describes a full pipeline (LayoutLMv3 + Tesseract OCR, pgvector indexing,
-FastAPI, Streamlit). Current truth:
+The README previously described a full pipeline (LayoutLMv3 + Tesseract OCR, pgvector indexing,
+FastAPI, Streamlit). Corrected 2026-09-20: the README no longer claims LayoutLMv3 (see §4.3 note). Current truth:
 
-- **LayoutLMv3:** not implemented — genuine behavior is a planned feature-flagged
-  item (FR-10). `core/document_ai.py` is a 61-line placeholder.
-- **pgvector:** database schema/index code exists in `database/db.py`, but
-  similarity/policy retrieval is not wired into the agent (FR-8 planned).
+- **LayoutLMv3:** not implemented — the README/architecture-PDF claims were corrected
+  2026-09-20 (genuine document-understanding stays planned, FR-10). `core/document_ai.py`
+  is Tesseract OCR + MiniLM embeddings; boxes use the 0-1000 convention shared by
+  transformer document models.
+- **pgvector:** verified 2026-09-20 against a live PostgreSQL 16 + pgvector 0.6.0 —
+  `find_similar_invoices` and `retrieve_policy` are registered agent tools (currently
+  optional in the mandatory tool sweep; decision pending before the next live eval).
 - **FastAPI/Streamlit:** `POST /audit` is wired to the real `AuditAgent` and the
   Streamlit app has an "Agentic Audit" section (done 2026-09-20; the same commit
   also fixed a pre-existing `score_invoice_xgb` bug — the tool had raised
@@ -272,16 +275,23 @@ Sequenced.
    `POST /audit` returns verdict/findings/evidence/degraded state; Streamlit has an
    "Agentic Audit" section. Also fixed the `score_invoice_xgb` `TypeError` (tool had
    errored on every agent call since creation).
-3. **Tracing & instrumentation** — per-tool and per-LLM-call latency, call
-   counts, token usage, and cost.
+3. ~~**Tracing & instrumentation**~~ — **done** 2026-09-20: per-tool and
+   per-LLM-call latency, call counts, Gemini `usageMetadata` token capture
+   (nulls when the backend reports none — never invented), and `cost_usd`
+   0.0 on the free tier. Exposed as a `trace` object in `POST /audit` and a
+   summary in the Streamlit "Agentic Audit" section.
 4. ~~**pgvector 6th tool**~~ — **done and verified** 2026-09-20 against a live
    PostgreSQL 16 + pgvector 0.6.0 (see §4.3 note). Open decision: keep retrieval
    optional in the tool sweep, or make it mandatory before the next live eval
    (quota cost tradeoff).
 5. **Engineering rigor** — pytest suite, GitHub Actions CI, Docker Compose,
    reviewer setup documentation (includes the §5.3 reference docs).
-6. **LayoutLMv3 behind a feature flag** — genuine document-understanding
-   behavior, off by default, so the deterministic pipeline stays the default.
+6. ~~**LayoutLMv3 behind a feature flag**~~ — **settled** 2026-09-20: honest
+   correction instead of a real model. The README and architecture-PDF
+   generator no longer claim LayoutLMv3; genuine document-understanding stays
+   planned (FR-10). Rationale: real LayoutLMv3 token classification needs
+   labeled invoice field data we don't have — without it, the model would be
+   expensive layout embeddings on top of what Tesseract already provides.
 
 Housekeeping (non-code): rotate the previously exposed Gemini API key, set the
 real GitHub git identity (currently a placeholder), push the unpushed local

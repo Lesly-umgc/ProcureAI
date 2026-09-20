@@ -19,7 +19,7 @@ import random
 import re
 import threading
 import time
-from typing import Optional
+from typing import Dict, Optional
 
 import requests
 
@@ -128,6 +128,11 @@ class GeminiClient:
         self.breaker_threshold = breaker_threshold
         self.timeout = timeout
         self._consecutive_failures = 0
+        # Token usage of the most recent successful call, captured from the
+        # response's usageMetadata. Consumed (reset to None) by the audit
+        # agent after each call; absent/partial metadata stays None — never
+        # invented.
+        self.last_usage: Optional[Dict[str, Optional[int]]] = None
 
     def _redacted_url(self) -> str:
         return self.base_url + "?key=" + REDACTED
@@ -167,6 +172,12 @@ class GeminiClient:
                     )
                 resp.raise_for_status()
                 data = resp.json()
+                usage = data.get("usageMetadata") or {}
+                self.last_usage = {
+                    "prompt_tokens": usage.get("promptTokenCount"),
+                    "candidates_tokens": usage.get("candidatesTokenCount"),
+                    "total_tokens": usage.get("totalTokenCount"),
+                }
                 text = data["candidates"][0]["content"]["parts"][0]["text"]
                 self._consecutive_failures = 0
                 return text

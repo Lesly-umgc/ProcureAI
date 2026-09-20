@@ -229,6 +229,34 @@ if payload and st.button("🚀 Run ReAct Agent Audit", key="react_audit"):
                 for f in audit.get("findings", []):
                     st.markdown(f"- {f}")
 
+                trace = audit.get("trace") or {}
+                if trace:
+                    st.subheader("⏱️ Trace — latency, tokens, cost")
+                    toks = trace.get("tokens") or {}
+                    total_toks = toks.get("total_tokens") or 0
+                    missing = toks.get("llm_calls_missing_usage", 0)
+                    t1, t2, t3, t4 = st.columns(4)
+                    with t1:
+                        st.metric("Wall time", f"{trace.get('audit_wall_s', 0):.1f}s")
+                    with t2:
+                        st.metric(
+                            "LLM / tool calls",
+                            f"{trace.get('llm_calls', 0)} / {trace.get('tool_calls', 0)}",
+                        )
+                    with t3:
+                        st.metric(
+                            "Total tokens",
+                            f"{total_toks:,}" if total_toks else "—",
+                        )
+                        if missing:
+                            st.caption(
+                                f"{missing} LLM call(s) did not report token usage"
+                            )
+                    with t4:
+                        st.metric("Cost", f"${trace.get('cost_usd', 0):.2f}")
+                    with st.expander("Per-call latencies"):
+                        st.json(trace.get("calls", []))
+
                 cites = audit.get("policy_citations", [])
                 if cites:
                     st.subheader("Cited policy sections")

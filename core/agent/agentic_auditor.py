@@ -16,7 +16,8 @@ import json
 import os
 import re
 import sys
-from typing import Any, Dict, List
+import time
+from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -126,6 +127,10 @@ class AuditAgent:
                  llm_fn=None):
         self.max_steps = max_steps
         self.trace: List[Dict[str, Any]] = []
+        # Per-call instrumentation, reset on every audit() call (the eval
+        # harness reuses one agent across invoices).
+        self.call_log: List[Dict[str, Any]] = []
+        self._audit_t0: float = 0.0
         if llm_fn is not None:
             self._llm = llm_fn
             self.model = "mock-llm (dry-run, not a real evaluation)"
@@ -133,6 +138,54 @@ class AuditAgent:
         self._client = GeminiClient(api_key=api_key, model=GEMINI_MODEL)
         self._llm = self._client.generate
         self.model = self._client.model
+
+    def _consume_usage(self) -> Optional[Dict[str, Optional[int]]]:
+        """Pop the last LLM call's token usage, if the backend captured any.
+
+        The live GeminiClient stores usageMetadata per call; the mock LLM
+        backend has none -> None, recorded honestly as missing.
+        """
+        client = getattr(self, "_client", None)
+        usage = getattr(client, "last_usage", None)
+        if client is not None:
+            client.last_usage = None  # consume: one usage record per call
+        return usage
+
+    def _build_trace(self) -> Dict[str, Any]:
+        """Summarize per-call instrumentation for this audit."""
+        llm_calls = [c for c in self.call_log if c["kind"] == "llm"]
+        tool_calls = [c for c in self.call_log if c["kind"] == "tool"]
+        prompt_toks = cand_toks = total_toks = 0
+        with_usage = 0
+        for c in llm_calls:
+            tok = c.get("tokens")
+            if tok and tok.get("total_tokens") is not None:
+                with_usage += 1
+                prompt_toks += tok.get("prompt_tokens") or 0
+                cand_toks += tok.get("candidates_tokens") or 0
+                total_toks += tok.get("total_tokens")
+        wall = (time.perf_counter() - self._audit_t0) if self._audit_t0 else 0.0
+        return {
+            "audit_wall_s": round(wall, 3),
+            "llm_calls": len(llm_calls),
+            "tool_calls": len(tool_calls),
+            "llm_latency_s": round(sum(c["latency_s"] for c in llm_calls), 4),
+            "tool_latency_s": round(sum(c["latency_s"] for c in tool_calls), 4),
+            "tokens": {
+                "prompt_tokens": prompt_toks,
+                "candidates_tokens": cand_toks,
+                "total_tokens": total_toks,
+                "llm_calls_with_usage": with_usage,
+                "llm_calls_missing_usage": len(llm_calls) - with_usage,
+            },
+            "cost_usd": 0.0,
+            "cost_note": (
+                "Free-tier Gemini model (allowlist enforced in "
+                "llm_throttle.py); $0 real spend. Raw token counts are "
+                "reported so a paid-tier cost estimate can be computed later."
+            ),
+            "calls": self.call_log,
+        }
 
     def _dispatch(self, action: str, action_input: Dict[str, Any],
                   context: Dict[str, Any]) -> Any:
@@ -161,6 +214,20 @@ class AuditAgent:
         except Exception as e:  # tools must never crash the loop
             return {"error": f"{action} failed: {e}"}
 
+    def _timed_dispatch(self, action: str, action_input: Dict[str, Any],
+                        context: Dict[str, Any], step: int) -> Any:
+        """Run a tool and record its latency in the per-call log."""
+        t0 = time.perf_counter()
+        obs = self._dispatch(action, action_input, context)
+        self.call_log.append({
+            "kind": "tool",
+            "step": step,
+            "name": action,
+            "latency_s": round(time.perf_counter() - t0, 4),
+            "error": bool(isinstance(obs, dict) and obs.get("error")),
+        })
+        return obs
+
     def _redacted_llm(self, prompt: str) -> str:
         """Call the LLM backend; any failure surfaces with secrets redacted."""
         try:
@@ -178,6 +245,8 @@ class AuditAgent:
         context = {"invoice": invoice, "po": po or {},
                    "vendor": vendor or {}, "history": history or []}
         self.trace = []
+        self.call_log = []
+        self._audit_t0 = time.perf_counter()
         system = SYSTEM_PROMPT.format(max_steps=self.max_steps,
                                       tools=tool_descriptions())
         transcript = [
@@ -189,12 +258,24 @@ class AuditAgent:
             if step == self.max_steps - 1:
                 prompt += ("\n\nThis is your LAST step. You MUST return the final "
                            "verdict JSON now (no action).")
+            t_llm = time.perf_counter()
             raw = self._redacted_llm(prompt)
+            llm_latency = time.perf_counter() - t_llm
+            llm_entry = {
+                "kind": "llm",
+                "step": step,
+                "latency_s": round(llm_latency, 4),
+                "parsed": True,
+                "tokens": self._consume_usage(),
+            }
             try:
                 msg = _extract_json(raw)
             except ValueError:
+                llm_entry["parsed"] = False
+                self.call_log.append(llm_entry)
                 transcript.append(f"Agent output (unparseable, retry): {raw[:300]}")
                 continue
+            self.call_log.append(llm_entry)
 
             self.trace.append({"step": step, "thought": msg.get("thought"),
                                "action": msg.get("action")})
@@ -204,7 +285,7 @@ class AuditAgent:
             if not action:
                 transcript.append("No action or verdict given; provide one.")
                 continue
-            obs = self._dispatch(action, msg.get("action_input", {}), context)
+            obs = self._timed_dispatch(action, msg.get("action_input", {}), context, step)
             self.trace[-1]["observation"] = obs
             transcript.append(
                 f"Thought: {msg.get('thought')}\nAction: {action}\n"
@@ -230,4 +311,5 @@ class AuditAgent:
             "amount_at_risk": float(msg.get("amount_at_risk", 0)),
             "steps": len(self.trace),
             "model": self.model,
+            "trace": self._build_trace(),
         }

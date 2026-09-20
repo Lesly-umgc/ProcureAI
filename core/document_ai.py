@@ -17,7 +17,9 @@ class DocumentAIProcessor:
 
     def process_invoice_image(self, image_path: str) -> dict:
         """
-        Extracts OCR text and bounding boxes using pytesseract and LayoutLMv3-ready format.
+        Extracts OCR text and bounding boxes using pytesseract. Boxes are
+        normalized to the 0-1000 range (the convention used by
+        transformer-based document models).
         """
         try:
             image = Image.open(image_path).convert("RGB")
@@ -36,7 +38,8 @@ class DocumentAIProcessor:
             if text:
                 full_text_lines.append(text)
                 x, y, w, h = ocr_data['left'][i], ocr_data['top'][i], ocr_data['width'][i], ocr_data['height'][i]
-                # Normalized coordinates 0-1000 for LayoutLMv3
+                # Normalized coordinates 0-1000 (convention used by
+                # transformer-based document models)
                 width, height = image.size
                 box = [
                     int(1000 * x / width),

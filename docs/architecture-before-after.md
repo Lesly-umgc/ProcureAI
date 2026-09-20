@@ -103,7 +103,7 @@ flowchart TD
 | Evals | none | 30 golden invoices + LLM judge, CI-gated | Every agent change is scored — no regressions |
 | pgvector | indexes, never queried | similarity search + policy retrieval | Claim becomes a working feature |
 | Rules vs ML | everything through the LLM | arithmetic/duplicates = code, patterns = XGBoost, ambiguity = agent | Cheaper, faster, more reliable; the LLM only does what needs judgment |
-| Doc AI | README said LayoutLMv3, code used Tesseract | (in progress) real LayoutLMv3 path or honest README | No claim survives without an implementation |
+| Doc AI | README said LayoutLMv3, code used Tesseract | honest README correction, done 2026-09-20 (genuine model stays planned, FR-10) | No claim survives without an implementation |
 | Ops | no tests/CI/Docker | pytest + GitHub Actions + Docker Compose | Anyone can clone, run, and verify |
 
 ## 4. Build order (where we are)
@@ -122,7 +122,7 @@ flowchart TD
     fixed template so embeddings cluster tightly (rankings need real varied text);
     retrieval is currently *optional* in the agent's mandatory sweep (decision
     pending before the next live eval, to protect API quota).
-- [ ] LayoutLMv3 document-AI path (or honest README correction)
+- [x] LayoutLMv3 document-AI path (or honest README correction) — settled 2026-09-20: honest correction; genuine model stays planned (FR-10)
 - [ ] Tracing, latency & cost per audit
 - [ ] pytest suite, GitHub Actions, Docker Compose
 - [ ] Push `ai-engineer-upgrade` → review → merge

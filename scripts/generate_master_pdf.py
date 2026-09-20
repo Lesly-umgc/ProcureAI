@@ -170,7 +170,6 @@ def generate_pdf():
          ▼
 ┌─────────────────────────────────────┐
 │  DOCUMENT AI & OCR LAYER            │
-│  • LayoutLMv3-base (token cls)      │
 │  • Tesseract OCR (text extraction)  │
 │  • Bounding box normalization       │
 └────────────┬────────────────────────┘
@@ -292,7 +291,7 @@ ProcureAI/
 │
 ├── core/                         # Core AI/ML engines
 │   ├── __init__.py
-│   ├── document_ai.py            # LayoutLMv3 + Tesseract OCR, embedding pipeline
+│   ├── document_ai.py            # Tesseract OCR, embedding pipeline
 │   ├── anomaly_engine.py         # XGBoost training, feature engineering, scoring
 │   └── agent_auditor.py          # Rate-limited Gemini Flash agentic audit loop
 │
@@ -375,7 +374,7 @@ class DocumentAIProcessor:
         image = Image.open(image_path).convert("RGB")
         ocr_data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
         
-        # Normalize bounding boxes to 0-1000 for LayoutLMv3 compatibility
+        # Normalize bounding boxes to 0-1000 (transformer document-model convention)
         for i in range(len(ocr_data['text'])):
             if ocr_data['text'][i].strip():
                 x, y, w, h = ocr_data['left'][i], ocr_data['top'][i], ocr_data['width'][i], ocr_data['height'][i]
@@ -389,7 +388,7 @@ class DocumentAIProcessor:
     story.append(Paragraph(
         "• <b>all-MiniLM-L6-v2</b>: 384-dim, 22M params, ~90MB — fits easily in 8GB RAM, fast CPU inference. "
         "• <b>normalize_embeddings=True</b>: Ensures cosine similarity = dot product, required for pgvector IVFFlat. "
-        "• <b>LayoutLMv3 bounding box normalization (0-1000)</b>: Standard format for transformer-based document understanding. "
+        "• <b>Bounding box normalization (0-1000)</b>: Standard format for transformer-based document understanding. "
         "• <b>Fallback image generation</b>: Creates synthetic receipt if file missing — enables CI/CD testing.",
         body_style
     ))
@@ -643,7 +642,7 @@ conn.commit()  # Per batch — atomic, recoverable"""
     story.append(Paragraph("5.2 Pipeline Processing Steps", h2_style))
     steps = [
         ["Step", "Component", "Operation", "Output"],
-        ["1", "Document AI", "Tesseract OCR + LayoutLMv3 token classification", "8 tokens with normalized bounding boxes"],
+        ["1", "Document AI", "Tesseract OCR tokenization", "8 tokens with normalized bounding boxes"],
         ["2", "Embedding", "all-MiniLM-L6-v2 encode(raw_text)", "384-dim normalized vector → pgvector"],
         ["3", "Feature Eng.", "po_ratio=1.06, threshold_prox=$638, tax_ratio=0.08", "7-dimensional feature vector"],
         ["4", "XGBoost Score", "predict_proba(features)[1]", "0.9000 (HIGH RISK)"],

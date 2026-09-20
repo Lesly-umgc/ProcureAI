@@ -54,7 +54,7 @@ The system implements an **Asymmetric Architecture**: local CPU-optimized execut
 
 ## ⚙️ How It Works: End-to-End Pipeline
 
-1. **Document Ingestion & OCR**: Incoming PDF or scanned receipts are processed using **LayoutLMv3** and **Tesseract OCR** to extract raw text and normalized bounding boxes.
+1. **Document Ingestion & OCR**: Incoming PDF or scanned receipts are processed using **Tesseract OCR** to extract raw text and normalized bounding boxes. (LayoutLMv3 token classification is planned future work — see FR-10 in `docs/PROJECT_DOCUMENTATION.md`; it is not wired in yet.)
 2. **Dense Vector Embeddings**: Text and metadata are transformed into **384-dimensional dense vectors** using `sentence-transformers/all-MiniLM-L6-v2` and indexed in **PostgreSQL with `pgvector`** for fuzzy vendor duplicate matching. The index also backs two *optional* agent tools — `find_similar_invoices` (cosine search over invoice history) and `retrieve_policy` (cosine search over a small, explicitly-synthetic policy corpus so verdicts can cite a policy section) — verified 2026-09-20 against a live PostgreSQL 16 + pgvector 0.6.0.
 3. **Tabular Anomaly Scoring**: Features like Purchase Order matching ratios, historical price variance, and threshold proximity are scored in real-time by a tuned **XGBoost classifier** (optimized with `scale_pos_weight` to handle imbalanced fraud classes).
 4. **Agentic LLM Policy Auditor**: High-risk invoices (anomaly score > 0.80) are automatically routed to **Gemini 3.1 Flash Lite** with exponential backoff. The agent performs multi-step verification against corporate compliance rules and outputs a structured JSON audit brief (`FLAG`, `REJECT`, or `APPROVE`).
@@ -65,7 +65,7 @@ The system implements an **Asymmetric Architecture**: local CPU-optimized execut
 ## 🛠️ Tech Stack (For Engineers)
 
 - **Storage & Vector DB**: PostgreSQL 16 + `pgvector` (IVFFlat indexing with `lists = 100`).
-- **Document AI / NLP**: `microsoft/layoutlmv3-base`, `pytesseract`, `sentence-transformers/all-MiniLM-L6-v2`.
+- **Document AI / NLP**: `pytesseract`, `sentence-transformers/all-MiniLM-L6-v2` (LayoutLMv3 token classification: planned future work, FR-10 — not implemented).
 - **Tabular Machine Learning**: `XGBoost`, `scikit-learn`, Pandas, NumPy.
 - **Agentic AI**: Google Gemini 3.1 Flash Lite API with `tenacity` retry wrappers.
 - **Backend & UI**: FastAPI, Uvicorn, Streamlit.

@@ -280,6 +280,8 @@ def run_agent_audit(
         "tool_errors": tool_errors,
         "policy_citations": policy_citations,
         "tool_results": tool_results,
+        # Trace: per-call latencies, call counts, token usage, cost (free tier).
+        "trace": out["trace"],
         "note": (
             "Audit performed by the ProcureAI ReAct agent (deterministic tools + "
             "free-tier LLM reasoning). Latency is 30-120s per invoice on the "
@@ -294,9 +296,11 @@ def agent_audit(req: AgentAuditRequest):
     """Run the real ReAct audit agent on an invoice payload.
 
     Returns the verdict (APPROVE / FLAG / REJECT), evidence-backed findings,
-    cited policy sections, per-tool observations, and a degraded flag when the
-    DB or a tool was unavailable. Returns 503 (not a verdict) when the LLM
-    backend cannot be reached — failures are honest errors, never fabricated.
+    cited policy sections, per-tool observations, a degraded flag when the
+    DB or a tool was unavailable, and a trace object with per-call latencies,
+    LLM/tool call counts, token usage, and cost. Returns 503 (not a verdict)
+    when the LLM backend cannot be reached — failures are honest errors,
+    never fabricated.
     """
     try:
         return run_agent_audit(
