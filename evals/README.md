@@ -71,6 +71,37 @@ with a prompt that mirrors `audit_invoice`'s format exactly. The DB-backed
 Output: a summary table on stdout (per-invoice verdict/recal + aggregates) and
 `evals/baseline_report.md`.
 
+## Agent eval gatekeeper (`run_agent_evals.py`)
+
+The ReAct agent (`core/agent/agentic_auditor.py`) is evaluated by a separate
+harness that doubles as a CI gate:
+
+```bash
+# credential-free harness self-test (dry-run; NOT an agent evaluation)
+.venv/bin/python evals/run_agent_evals.py --mock-llm
+
+# live agent eval (needs key; writes evals/agent_results.json + evals/agent_report.md)
+GEMINI_API_KEY=<key> .venv/bin/python evals/run_agent_evals.py [--limit 6]
+```
+
+Gate rules: exit 0 only if verdict accuracy >= `--min-accuracy` (default 80%),
+mean findings recall >= `--min-recall`, and agent errors <= `--max-errors`
+(default 0). Exit 1 = gate failed, exit 2 = config error (no key, non-free-tier
+model, bad judge).
+
+Honesty guarantees (enforced in code, not convention):
+
+- **Free-tier only**: `GEMINI_MODEL` must be on the allowlist in
+  `core/agent/llm_throttle.py`; anything else fails before any API call.
+- **No silent skips**: agent exceptions become failed rows
+  (`verdict_match: false`, recall 0.0) and count against the gate.
+- **No fabricated reports**: `--mock-llm` is loudly labeled a harness
+  self-test and never writes `evals/agent_report.md`; only a live run does.
+- **No secret leaks**: all stdout/JSON/markdown output passes through
+  `llm_throttle.redact()` (API keys can never land in reports again).
+- Reports include a 95% Wilson CI on accuracy, per-type breakdown, git commit,
+  model, and judge mode.
+
 ## What "baseline" means
 
 - **Mock-mode numbers** validate the harness plumbing (prompt construction,

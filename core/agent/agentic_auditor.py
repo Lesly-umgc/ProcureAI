@@ -20,14 +20,14 @@ from typing import Any, Dict, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-import requests
 
 from core.agent.tools import TOOLS, tool_descriptions
+from core.agent.llm_throttle import GeminiClient, redact
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
-GEMINI_API_URL = (
-    f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-)
+# Note: free-tier enforcement happens inside GeminiClient.__init__ (via
+# llm_throttle.assert_free_tier) so that misconfiguration fails with a clean
+# config error instead of at import time.
 MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "8"))
 
 SYSTEM_PROMPT = """You are a procurement fraud audit agent. You investigate ONE invoice
@@ -68,28 +68,6 @@ Verdict guidance:
 """
 
 
-def _llm_call(api_key: str, prompt: str, retries: int = 3) -> str:
-    import time
-    last = None
-    for attempt in range(retries):
-        try:
-            resp = requests.post(
-                GEMINI_API_URL + f"?key={api_key}",
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1200},
-                },
-                timeout=60,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            last = e
-            time.sleep(2 ** attempt * 2)  # backoff for 429/503
-    raise last
-
-
 def _extract_json(text: str) -> Dict[str, Any]:
     """Pull the first {...} JSON object out of model output."""
     match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -99,14 +77,24 @@ def _extract_json(text: str) -> Dict[str, Any]:
 
 
 class AuditAgent:
-    """ReAct audit agent. Needs GEMINI_API_KEY; tools need no credentials."""
+    """ReAct audit agent.
 
-    def __init__(self, api_key: str | None = None, max_steps: int = MAX_STEPS):
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        if not self.api_key:
-            raise ValueError("GEMINI_API_KEY is required for the audit agent")
+    Live mode needs GEMINI_API_KEY (free-tier model only, enforced by
+    llm_throttle). Pass ``llm_fn`` to inject a deterministic backend instead
+    (used by the eval harness's --mock-llm dry-run; never a real evaluation).
+    """
+
+    def __init__(self, api_key: str | None = None, max_steps: int = MAX_STEPS,
+                 llm_fn=None):
         self.max_steps = max_steps
         self.trace: List[Dict[str, Any]] = []
+        if llm_fn is not None:
+            self._llm = llm_fn
+            self.model = "mock-llm (dry-run, not a real evaluation)"
+            return
+        self._client = GeminiClient(api_key=api_key, model=GEMINI_MODEL)
+        self._llm = self._client.generate
+        self.model = self._client.model
 
     def _dispatch(self, action: str, action_input: Dict[str, Any],
                   context: Dict[str, Any]) -> Any:
@@ -124,6 +112,16 @@ class AuditAgent:
             return fn(context["invoice"])
         except Exception as e:  # tools must never crash the loop
             return {"error": f"{action} failed: {e}"}
+
+    def _redacted_llm(self, prompt: str) -> str:
+        """Call the LLM backend; any failure surfaces with secrets redacted."""
+        try:
+            return self._llm(prompt)
+        except Exception as e:  # noqa: BLE001 - redacted, then re-raised
+            key = getattr(self, "_client", None)
+            raise RuntimeError(
+                redact(e, key.api_key if key else None)
+            ) from e
 
     def audit(self, invoice: Dict[str, Any], po: Dict[str, Any] | None = None,
               vendor: Dict[str, Any] | None = None,
@@ -143,7 +141,7 @@ class AuditAgent:
             if step == self.max_steps - 1:
                 prompt += ("\n\nThis is your LAST step. You MUST return the final "
                            "verdict JSON now (no action).")
-            raw = _llm_call(self.api_key, prompt)
+            raw = self._redacted_llm(prompt)
             try:
                 msg = _extract_json(raw)
             except ValueError:
@@ -183,5 +181,5 @@ class AuditAgent:
             "findings": list(msg.get("findings", [])),
             "amount_at_risk": float(msg.get("amount_at_risk", 0)),
             "steps": len(self.trace),
-            "model": GEMINI_MODEL,
+            "model": self.model,
         }
