@@ -49,7 +49,9 @@ def get_metrics(db: Session = Depends(get_db)):
         "flagged_invoices": flagged_invoices,
         "total_audits": total_audits,
         "flagged_fraud_amount": round(flagged_fraud_amount, 2),
-        "audit_prep_time_reduction_pct": 78.5
+        # Measured via proofs/prove_efficiency.py (99.87% reduction vs a
+        # 4-min/invoice manual baseline). Re-run the proof if the pipeline changes.
+        "audit_prep_time_reduction_pct": 99.87
     }
 
 @app.get("/invoices")
