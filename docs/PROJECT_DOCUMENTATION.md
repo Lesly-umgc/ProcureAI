@@ -37,7 +37,7 @@ headline metric or feature is stated without a rerunnable proof or an eval resul
 | FR-3 | Measure audit-preparation time reduction against a documented manual baseline | ✅ Done — **99.87%** reduction (automated wall-clock vs. assumed 4-minute manual baseline) | `proofs/prove_efficiency.py` |
 | FR-4 | Provide a ReAct agent that audits invoices with deterministic tools and emits a structured verdict | ✅ Done — 7 tools: the 5 originals plus `find_similar_invoices` and `retrieve_policy` (pgvector) | `core/agent/agentic_auditor.py`, `core/agent/tools.py`, `core/agent/retrieval.py` |
 | FR-5 | Evaluate the agent on a fixed 30-invoice golden set with an 80% verdict-accuracy gate, where agent errors count as failures | 🟡 In progress — **70.0%** (21/30), CI 52.1%–83.3%, 0 errors | `evals/run_agent_evals.py`, `evals/agent_report.md` |
-| FR-6 | Serve audits through FastAPI REST endpoints and a Streamlit dashboard | 🟡 Partial — `api/main.py` and `dashboard/app.py` exist; agent integration not wired | Roadmap item 2 |
+| FR-6 | Serve audits through FastAPI REST endpoints and a Streamlit dashboard | ✅ Done 2026-09-20 — `POST /audit` wired to the real `AuditAgent`; Streamlit has an "Agentic Audit" section; honest 503 on LLM failure, `degraded` flag on tool/DB outages | — |
 | FR-7 | Record per-tool/LLM latency, call counts, tokens, and cost | ❌ Planned | Roadmap item 3 |
 | FR-8 | Add historical-invoice similarity + policy retrieval as a 6th agent tool backed by real pgvector | ✅ Done 2026-09-20 (verified vs. live PostgreSQL 16 + pgvector 0.6.0) | §4.3 note below |
 | FR-9 | Provide pytest suite, GitHub Actions CI, Docker Compose, and reviewer setup docs | ❌ Planned | Roadmap item 5 |
@@ -64,8 +64,11 @@ FastAPI, Streamlit). Current truth:
   item (FR-10). `core/document_ai.py` is a 61-line placeholder.
 - **pgvector:** database schema/index code exists in `database/db.py`, but
   similarity/policy retrieval is not wired into the agent (FR-8 planned).
-- **FastAPI/Streamlit:** endpoint/dashboard files exist, but the new `AuditAgent` is
-  not yet integrated (FR-6 partial).
+- **FastAPI/Streamlit:** `POST /audit` is wired to the real `AuditAgent` and the
+  Streamlit app has an "Agentic Audit" section (done 2026-09-20; the same commit
+  also fixed a pre-existing `score_invoice_xgb` bug — the tool had raised
+  `TypeError` on every agent call since creation, so the 60%→70% climb happened
+  with the ML tool silently erroring).
 - **Agent eval:** 70.0% vs. the 80% gate — work continues; see §8.
 
 ---
@@ -136,7 +139,7 @@ structured invoice ──(FR-1 ✅)──► scripts/synthesize.py (shared deter
 | `evals/run_agent_evals.py` | Hardened live eval runner; writes `evals/agent_report.md` + `evals/agent_results.json`. |
 | `evals/run_evals.py` | Legacy baseline eval runner. |
 | `database/db.py` | PostgreSQL + pgvector schema/index setup; includes the `Policy` ORM model and `policies_embedding_idx` (FR-8 done 2026-09-20). |
-| `api/main.py`, `dashboard/app.py` | FastAPI/Streamlit scaffolds (agent integration pending, FR-6). |
+| `api/main.py`, `dashboard/app.py` | FastAPI `POST /audit` + Streamlit "Agentic Audit" section, both wired to the real agent (FR-6 done 2026-09-20). |
 
 ### 4.2 How to reproduce the headline numbers
 
@@ -220,7 +223,7 @@ reference index are future work (part of FR-9's reviewer docs).*
 - **Extend the tools:** add a function to `core/agent/tools.py` and register it
   in the agent's tool sweep; the eval gate will tell you if it helped.
 - **Run the app:** `uvicorn api.main:app` and `streamlit run dashboard/app.py`
-  (agent integration pending — FR-6).
+  (real `AuditAgent` wired in — FR-6 done 2026-09-20).
 
 ### 5.3 Planned (List/Reference)
 
@@ -265,8 +268,10 @@ Sequenced.
    documented honest stop with remaining misses analyzed. Run-4 retry is
    scheduled for 2026-09-21 ~05:42 EDT after the free-tier quota reset; the
    70.0% run-3 result stands as the current honest number until then.
-2. **Integrate `AuditAgent` into FastAPI and Streamlit** — wire the ReAct agent
-   into `api/main.py` endpoints and `dashboard/app.py` views.
+2. ~~**Integrate `AuditAgent` into FastAPI and Streamlit**~~ — **done** 2026-09-20:
+   `POST /audit` returns verdict/findings/evidence/degraded state; Streamlit has an
+   "Agentic Audit" section. Also fixed the `score_invoice_xgb` `TypeError` (tool had
+   errored on every agent call since creation).
 3. **Tracing & instrumentation** — per-tool and per-LLM-call latency, call
    counts, token usage, and cost.
 4. ~~**pgvector 6th tool**~~ — **done and verified** 2026-09-20 against a live

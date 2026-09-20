@@ -147,6 +147,16 @@ class AuditAgent:
                 return fn(context["invoice"], context.get("po", {}))
             if action == "assess_vendor":
                 return fn(context.get("vendor", {}), context.get("history", []))
+            if action == "score_invoice_xgb":
+                # The XGBoost tool needs amount_limit (from the PO) and
+                # risk_rating (from the vendor master) — enrich the invoice
+                # dict with the audit context so it scores on real features.
+                enriched = dict(context["invoice"])
+                enriched.setdefault("amount_limit",
+                                    context.get("po", {}).get("amount_limit", 0))
+                enriched.setdefault("risk_rating",
+                                    context.get("vendor", {}).get("risk_rating", 0))
+                return fn(enriched)
             return fn(context["invoice"])
         except Exception as e:  # tools must never crash the loop
             return {"error": f"{action} failed: {e}"}

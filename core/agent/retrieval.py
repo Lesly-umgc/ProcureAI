@@ -101,8 +101,8 @@ def find_similar_invoices(invoice: Dict[str, Any], k: int = 5) -> Dict[str, Any]
     """
     try:
         vec = _embed_text(_invoice_query_text(invoice))
-    except RuntimeError as e:
-        return _unavailable(str(e))
+    except Exception as e:  # noqa: BLE001 - any embedding failure degrades gracefully
+        return _unavailable(f"embedding unavailable ({type(e).__name__}): {e}")
     try:
         engine = _get_engine()
         inv_id = invoice.get("invoice_id")
@@ -167,8 +167,8 @@ def retrieve_policy(invoice: Dict[str, Any], k: int = 3) -> Dict[str, Any]:
     )
     try:
         vec = _embed_text(query_text)
-    except RuntimeError as e:
-        return _unavailable(str(e))
+    except Exception as e:  # noqa: BLE001 - any embedding failure degrades gracefully
+        return _unavailable(f"embedding unavailable ({type(e).__name__}): {e}")
     try:
         engine = _get_engine()
         stmt = (

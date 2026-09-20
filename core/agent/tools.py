@@ -41,23 +41,23 @@ def _get_engine() -> AnomalyScoringEngine:
 def score_invoice_xgb(invoice: Dict[str, Any]) -> Dict[str, Any]:
     """Score one invoice with the trained XGBoost model.
 
-    invoice needs: subtotal, total_amount, tax_amount, amount_limit, risk_rating.
-    Returns anomaly_score (0-1) and the engineered features used.
+    invoice needs: subtotal, total_amount, amount_limit, risk_rating.
+    Returns anomaly_score (0-1) and a risk_level string.
     """
     eng = _get_engine()
     if eng.model is None:
         return {"error": "model not trained — call train first", "anomaly_score": 0.0}
-    result = eng.score_invoice(
+    score = eng.score_invoice(
         subtotal=float(invoice.get("subtotal", 0)),
         total_amount=float(invoice.get("total_amount", 0)),
-        tax_amount=float(invoice.get("tax_amount", 0)),
         amount_limit=float(invoice.get("amount_limit", 0)),
         risk_rating=float(invoice.get("risk_rating", 0)),
     )
+    score = float(score)
+    risk_level = "high" if score >= 0.7 else "medium" if score >= 0.4 else "low"
     return {
-        "anomaly_score": round(result["anomaly_score"], 4),
-        "risk_level": result["risk_level"],
-        "features": {k: round(v, 4) for k, v in result["features"].items()},
+        "anomaly_score": round(score, 4),
+        "risk_level": risk_level,
     }
 
 
