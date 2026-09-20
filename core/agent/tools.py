@@ -1,0 +1,227 @@
+"""Deterministic tools for the ProcureAI audit agent.
+
+Each tool is a pure function (no LLM) encapsulating real repo logic:
+XGBoost scoring, arithmetic verification, duplicate detection, PO matching,
+vendor risk. The agent (agent.py) calls these in a ReAct loop; the LLM
+reasons, the tools compute. That is what makes it an agent rather than
+a single prompt.
+
+All tools work on plain dicts and need no database — data comes from
+scripts/synthesize.py (same distribution as the proofs) or the caller.
+"""
+from __future__ import annotations
+
+import os
+import sys
+from typing import Any, Dict, List
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+import pandas as pd
+
+from core.anomaly_engine import AnomalyScoringEngine, FEATURE_COLUMNS
+
+# ---------------------------------------------------------------------------
+# Shared engine (loaded once)
+# ---------------------------------------------------------------------------
+_engine: AnomalyScoringEngine | None = None
+
+
+def _get_engine() -> AnomalyScoringEngine:
+    global _engine
+    if _engine is None:
+        _engine = AnomalyScoringEngine()
+    return _engine
+
+
+# ---------------------------------------------------------------------------
+# Tool: XGBoost anomaly score
+# ---------------------------------------------------------------------------
+def score_invoice_xgb(invoice: Dict[str, Any]) -> Dict[str, Any]:
+    """Score one invoice with the trained XGBoost model.
+
+    invoice needs: subtotal, total_amount, tax_amount, amount_limit, risk_rating.
+    Returns anomaly_score (0-1) and the engineered features used.
+    """
+    eng = _get_engine()
+    if eng.model is None:
+        return {"error": "model not trained — call train first", "anomaly_score": 0.0}
+    result = eng.score_invoice(
+        subtotal=float(invoice.get("subtotal", 0)),
+        total_amount=float(invoice.get("total_amount", 0)),
+        tax_amount=float(invoice.get("tax_amount", 0)),
+        amount_limit=float(invoice.get("amount_limit", 0)),
+        risk_rating=float(invoice.get("risk_rating", 0)),
+    )
+    return {
+        "anomaly_score": round(result["anomaly_score"], 4),
+        "risk_level": result["risk_level"],
+        "features": {k: round(v, 4) for k, v in result["features"].items()},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: arithmetic verification (deterministic)
+# ---------------------------------------------------------------------------
+def verify_arithmetic(invoice: Dict[str, Any], tax_rate: float = 0.08) -> Dict[str, Any]:
+    """Check subtotal + tax == total and line items sum to subtotal.
+
+    Returns ok=False with the exact discrepancy when the math doesn't add up.
+    This catches CALC_DISCREPANCY with certainty — no ML needed.
+    """
+    subtotal = float(invoice.get("subtotal", 0))
+    tax = float(invoice.get("tax_amount", 0))
+    total = float(invoice.get("total_amount", 0))
+    expected_total = round(subtotal + tax, 2)
+    total_ok = abs(expected_total - total) < 0.01
+
+    expected_tax = round(subtotal * tax_rate, 2)
+    tax_ok = abs(expected_tax - tax) < 0.01
+
+    findings = []
+    if not total_ok:
+        findings.append(
+            f"total mismatch: subtotal ${subtotal:,.2f} + tax ${tax:,.2f} = "
+            f"${expected_total:,.2f} expected, but billed ${total:,.2f} "
+            f"(overstated by ${total - expected_total:,.2f})"
+        )
+    if not tax_ok:
+        findings.append(
+            f"tax mismatch: {tax_rate:.0%} of ${subtotal:,.2f} = ${expected_tax:,.2f} "
+            f"expected, but ${tax:,.2f} charged"
+        )
+    return {
+        "ok": total_ok and tax_ok,
+        "expected_total": expected_total,
+        "actual_total": total,
+        "total_diff": round(total - expected_total, 2),
+        "findings": findings,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: duplicate detection (deterministic)
+# ---------------------------------------------------------------------------
+def find_duplicates(invoice: Dict[str, Any], history: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Find near-duplicate invoices in history: same vendor + same PO + amount
+    within 2% + date within 45 days. Returns matches with evidence."""
+    vendor = invoice.get("vendor_id")
+    po = invoice.get("po_id")
+    amount = float(invoice.get("total_amount", 0))
+    date = pd.to_datetime(invoice.get("invoice_date"))
+    inv_id = invoice.get("invoice_id")
+
+    matches = []
+    for h in history:
+        if h.get("invoice_id") == inv_id:
+            continue
+        if h.get("vendor_id") != vendor or h.get("po_id") != po:
+            continue
+        h_amount = float(h.get("total_amount", 0))
+        if abs(h_amount - amount) / max(amount, 1) > 0.02:
+            continue
+        h_date = pd.to_datetime(h.get("invoice_date"))
+        if abs((date - h_date).days) > 45:
+            continue
+        matches.append({
+            "invoice_id": h.get("invoice_id"),
+            "total_amount": h_amount,
+            "invoice_date": str(h.get("invoice_date")),
+            "amount_diff_pct": round(abs(h_amount - amount) / max(amount, 1) * 100, 2),
+        })
+    return {"duplicate_found": len(matches) > 0, "matches": matches}
+
+
+# ---------------------------------------------------------------------------
+# Tool: PO matching (deterministic)
+# ---------------------------------------------------------------------------
+def check_po(invoice: Dict[str, Any], po: Dict[str, Any]) -> Dict[str, Any]:
+    """Compare billed total against the PO amount limit.
+
+    Returns over_limit flag and the overage — catches PRICE_DRIFT and SPLIT_PO.
+    """
+    total = float(invoice.get("total_amount", 0))
+    limit = float(po.get("amount_limit", 0))
+    over = total - limit
+    over_pct = (over / limit * 100) if limit else 0.0
+    near_threshold = abs(total - 10_000.0) < 500  # just under approval threshold
+    return {
+        "po_id": po.get("po_id"),
+        "billed": round(total, 2),
+        "po_limit": round(limit, 2),
+        "over_limit": over > 0,
+        "overage": round(over, 2),
+        "over_pct": round(over_pct, 2),
+        "near_10k_threshold": near_threshold,
+        "finding": (
+            f"billed ${total:,.2f} exceeds PO limit ${limit:,.2f} by "
+            f"${over:,.2f} ({over_pct:.1f}%)" if over > 0 else None
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool: vendor risk (deterministic)
+# ---------------------------------------------------------------------------
+def assess_vendor(vendor: Dict[str, Any], history: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Summarize vendor risk: rating, invoice volume, past flags.
+
+    A vendor with risk_rating >= 0.7 and thin history is treated as a
+    potential ghost vendor.
+    """
+    vendor_id = vendor.get("vendor_id")
+    rating = float(vendor.get("risk_rating", 0))
+    past = [h for h in history if h.get("vendor_id") == vendor_id]
+    flagged = sum(1 for h in past if h.get("status") == "FLAGGED")
+    ghost_signals = []
+    if rating >= 0.7:
+        ghost_signals.append(f"risk rating {rating:.2f} >= 0.70 (high-risk vendor)")
+    if len(past) <= 2:
+        ghost_signals.append(f"only {len(past)} prior invoices (thin history)")
+    return {
+        "vendor_id": vendor_id,
+        "vendor_name": vendor.get("vendor_name"),
+        "risk_rating": rating,
+        "prior_invoices": len(past),
+        "prior_flagged": flagged,
+        "ghost_suspect": len(ghost_signals) > 0,
+        "ghost_signals": ghost_signals,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool registry (name -> function + description for the agent prompt)
+# ---------------------------------------------------------------------------
+TOOLS = {
+    "score_invoice_xgb": (
+        score_invoice_xgb,
+        "Score the invoice with the XGBoost anomaly model. Input: invoice dict. "
+        "Returns anomaly_score 0-1 and risk_level.",
+    ),
+    "verify_arithmetic": (
+        verify_arithmetic,
+        "Verify subtotal + tax == total exactly. Input: invoice dict. "
+        "Returns ok flag and exact discrepancies. Use first — it is certain.",
+    ),
+    "find_duplicates": (
+        find_duplicates,
+        "Search history for near-duplicate invoices (same vendor+PO, amount within "
+        "2%, date within 45 days). Input: invoice dict, history list.",
+    ),
+    "check_po": (
+        check_po,
+        "Compare billed total to the PO amount limit. Input: invoice dict, po dict. "
+        "Returns over_limit flag and overage.",
+    ),
+    "assess_vendor": (
+        assess_vendor,
+        "Assess vendor risk and ghost-vendor signals. Input: vendor dict, history list.",
+    ),
+}
+
+
+def tool_descriptions() -> str:
+    lines = []
+    for name, (_, desc) in TOOLS.items():
+        lines.append(f"- {name}: {desc}")
+    return "\n".join(lines)
