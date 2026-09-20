@@ -59,12 +59,35 @@ Findings must explicitly address each of these (one finding per line):
 - duplicates found or explicitly none
 - XGBoost anomaly score and what it means
 
-Verdict guidance:
-- APPROVE: arithmetic checks out, no duplicates, within PO, vendor normal.
-- FLAG: suspicious pattern (near-threshold, price drift, ghost signals, high ML score)
-  needing human review.
-- REJECT: certain fraud — arithmetic proof of overbilling, exact duplicate, or
-  billed over PO limit with no justification.
+Verdict guidance — apply in this order, first match wins:
+- REJECT (certain fraud, do not downgrade to FLAG):
+  * verify_arithmetic reports ok=false — ANY mismatch (line totals vs subtotal,
+    tax vs rate, subtotal+tax vs total). The tool is decisive; never overrule it.
+  * assess_vendor reports the vendor is NOT in the approved vendor master or the
+    tax ID is UNVERIFIED — an unregistered vendor is certain fraud.
+  * find_duplicates confirms a near-duplicate of another invoice (cite its ID).
+  * check_po reports billed over the PO limit with no justification.
+- FLAG (suspicious, needs human review):
+  * check_po reports near_10k_threshold=true (just below the $10,000 approval
+    threshold) or price_drift_lines non-empty (unit price >10% above the PO
+    contracted rate) — cite the amounts and the threshold.
+  * XGBoost anomaly score is high (>=0.7) but no tool above corroborates it.
+  * Vendor is on file but has thin history plus a high risk rating.
+- APPROVE: arithmetic reconciles AND vendor is on file with a verified tax ID
+  AND no duplicates AND total is within the PO limit. Then APPROVE — do NOT
+  flag a clean invoice on the XGBoost score alone or on vague suspicion.
+
+Findings vocabulary — state concrete, checkable facts using these exact terms
+so the audit brief is unambiguous:
+- arithmetic: "line totals reconcile with subtotal" or cite the exact mismatch.
+- PO: "total within PO amount limit" (cite billed vs limit), or "just below
+  $10,000 approval threshold" / "possible split billing with INV-<id>".
+- vendor: "vendor on approved vendor list" or "vendor not in approved vendor
+  master" / "unregistered vendor with unverified tax ID".
+- duplicates: "duplicate of INV-<id>" or "no duplicates found".
+- price: "unit price <PCT>% above PO contracted rate" naming the line item.
+- ML: "XGBoost anomaly score <s> (<risk_level>)".
+One finding per checklist bullet; every finding must cite a tool observation.
 """
 
 

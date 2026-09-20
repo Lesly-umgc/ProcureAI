@@ -117,6 +117,9 @@ def train_xgb_for_tools():
 
 
 def golden_to_context(g: dict, all_golden: list) -> dict:
+    # Only fields a real auditor would see: the invoice document (with line
+    # items), the PO, and the vendor-master lookup. Never the fraud label,
+    # the expected verdict/findings, or the analyst notes.
     invoice = {
         "invoice_id": g["invoice_number"],
         "vendor_id": g["vendor_name"],
@@ -125,12 +128,15 @@ def golden_to_context(g: dict, all_golden: list) -> dict:
         "tax_amount": g["tax_amount"],
         "total_amount": g["total_amount"],
         "invoice_date": g["invoice_date"],
+        "line_items": g.get("line_items", []),
     }
     po = {"po_id": g["po_number"], "amount_limit": g["po_amount_limit"]}
     vendor = {
         "vendor_id": g["vendor_name"],
         "vendor_name": g["vendor_name"],
         "risk_rating": g["vendor_risk_rating"],
+        "on_file": g.get("vendor_on_file", True),
+        "tax_id": g.get("vendor_tax_id", ""),
     }
     history = []
     for h in all_golden:

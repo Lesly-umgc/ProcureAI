@@ -136,15 +136,32 @@ def find_duplicates(invoice: Dict[str, Any], history: List[Dict[str, Any]]) -> D
 # Tool: PO matching (deterministic)
 # ---------------------------------------------------------------------------
 def check_po(invoice: Dict[str, Any], po: Dict[str, Any]) -> Dict[str, Any]:
-    """Compare billed total against the PO amount limit.
+    """Compare billed total against the PO amount limit and each line's unit
+    price against its PO contracted rate.
 
-    Returns over_limit flag and the overage — catches PRICE_DRIFT and SPLIT_PO.
+    Returns over_limit flag and overage — catches SPLIT_PO — plus per-line
+    price-drift findings — catches PRICE_DRIFT with certainty, no ML needed.
     """
     total = float(invoice.get("total_amount", 0))
     limit = float(po.get("amount_limit", 0))
     over = total - limit
     over_pct = (over / limit * 100) if limit else 0.0
     near_threshold = abs(total - 10_000.0) < 500  # just under approval threshold
+
+    drift_lines = []
+    for line in invoice.get("line_items", []) or []:
+        unit = line.get("unit_price")
+        contracted = line.get("po_unit_price")
+        if unit is None or contracted is None:
+            continue
+        unit, contracted = float(unit), float(contracted)
+        if contracted > 0 and unit > contracted * 1.10:  # >10% above contract
+            drift_pct = round((unit - contracted) / contracted * 100, 1)
+            drift_lines.append(
+                f"{line.get('description', 'line item')}: unit price "
+                f"${unit:,.2f} is {drift_pct}% above PO contracted rate "
+                f"${contracted:,.2f}"
+            )
     return {
         "po_id": po.get("po_id"),
         "billed": round(total, 2),
@@ -153,6 +170,7 @@ def check_po(invoice: Dict[str, Any], po: Dict[str, Any]) -> Dict[str, Any]:
         "overage": round(over, 2),
         "over_pct": round(over_pct, 2),
         "near_10k_threshold": near_threshold,
+        "price_drift_lines": drift_lines,
         "finding": (
             f"billed ${total:,.2f} exceeds PO limit ${limit:,.2f} by "
             f"${over:,.2f} ({over_pct:.1f}%)" if over > 0 else None
@@ -164,16 +182,24 @@ def check_po(invoice: Dict[str, Any], po: Dict[str, Any]) -> Dict[str, Any]:
 # Tool: vendor risk (deterministic)
 # ---------------------------------------------------------------------------
 def assess_vendor(vendor: Dict[str, Any], history: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Summarize vendor risk: rating, invoice volume, past flags.
+    """Summarize vendor risk: master-file standing, tax-ID verification,
+    rating, invoice volume, past flags.
 
-    A vendor with risk_rating >= 0.7 and thin history is treated as a
-    potential ghost vendor.
+    A vendor NOT on the approved vendor master, or with an unverified tax ID,
+    is a hard ghost-vendor signal — certain fraud, not mere suspicion.
     """
     vendor_id = vendor.get("vendor_id")
     rating = float(vendor.get("risk_rating", 0))
     past = [h for h in history if h.get("vendor_id") == vendor_id]
     flagged = sum(1 for h in past if h.get("status") == "FLAGGED")
+    on_file = vendor.get("on_file", True)
+    tax_id = vendor.get("tax_id", "")
+    tax_verified = bool(tax_id) and str(tax_id).upper() != "UNVERIFIED"
     ghost_signals = []
+    if not on_file:
+        ghost_signals.append("vendor NOT in approved vendor master")
+    if not tax_verified:
+        ghost_signals.append("tax ID UNVERIFIED")
     if rating >= 0.7:
         ghost_signals.append(f"risk rating {rating:.2f} >= 0.70 (high-risk vendor)")
     if len(past) <= 2:
@@ -181,6 +207,8 @@ def assess_vendor(vendor: Dict[str, Any], history: List[Dict[str, Any]]) -> Dict
     return {
         "vendor_id": vendor_id,
         "vendor_name": vendor.get("vendor_name"),
+        "on_file": on_file,
+        "tax_id_verified": tax_verified,
         "risk_rating": rating,
         "prior_invoices": len(past),
         "prior_flagged": flagged,
@@ -210,8 +238,9 @@ TOOLS = {
     ),
     "check_po": (
         check_po,
-        "Compare billed total to the PO amount limit. Input: invoice dict, po dict. "
-        "Returns over_limit flag and overage.",
+        "Compare billed total to the PO amount limit AND each line's unit price "
+        "to its PO contracted rate. Input: invoice dict, po dict. Returns "
+        "over_limit flag, overage, near_10k_threshold, and price_drift_lines.",
     ),
     "assess_vendor": (
         assess_vendor,
