@@ -40,7 +40,7 @@ headline metric or feature is stated without a rerunnable proof or an eval resul
 | FR-6 | Serve audits through FastAPI REST endpoints and a Streamlit dashboard | ✅ Done 2026-09-20 — `POST /audit` wired to the real `AuditAgent`; Streamlit has an "Agentic Audit" section; honest 503 on LLM failure, `degraded` flag on tool/DB outages | — |
 | FR-7 | Record per-tool/LLM latency, call counts, tokens, and cost | ✅ Done 2026-09-20 — `trace` object on `POST /audit` and Streamlit summary | Roadmap item 3 |
 | FR-8 | Add historical-invoice similarity + policy retrieval as a 6th agent tool backed by real pgvector | ✅ Done 2026-09-20 (verified vs. live PostgreSQL 16 + pgvector 0.6.0) | §4.3 note below |
-| FR-9 | Provide pytest suite, GitHub Actions CI, Docker Compose, and reviewer setup docs | 🟡 Partial — pytest suite done 2026-09-20 (53 tests, all green) and GitHub Actions CI done 2026-09-20 (install → compileall → secret scan → pytest on push/PR); Docker Compose and reviewer docs pending | Roadmap item 5 |
+| FR-9 | Provide pytest suite, GitHub Actions CI, Docker Compose, and reviewer setup docs | 🟡 Partial — pytest suite done 2026-09-20 (53 tests, all green), GitHub Actions CI done 2026-09-20, Docker Compose done 2026-09-20 (one-command reviewer setup: Postgres 16 + pgvector, init/seed, API on :8000, Streamlit on :8501); reviewer docs pending | Roadmap item 5 |
 | FR-10 | Implement genuine LayoutLMv3 document understanding behind an off-by-default feature flag | ❌ Planned | Roadmap item 6 |
 
 ### 2.2 Non-functional requirements
@@ -291,8 +291,33 @@ Sequenced.
    live Gemini or Postgres in the suite), GitHub Actions CI (**done**
    2026-09-20: `.github/workflows/ci.yml` runs install → compileall →
    `scripts/ci_secret_scan.sh` → pytest on push/PR to `ai-engineer-upgrade`
-   and `main`; the scan was proven against a planted token), Docker Compose,
-   reviewer setup documentation (includes the §5.3 reference docs).
+   and `main`; the scan was proven against a planted token), Docker Compose
+   (**done** 2026-09-20, **live-verified** 2026-09-20: `docker-compose.yml` +
+   `Dockerfile` + `.dockerignore` — one command brings up Postgres 16 +
+   pgvector, a one-shot init/seed (tables, vector extension, IVFFlat indexes,
+   8 real-embedded synthetic policies), the FastAPI API on :8000, and
+   Streamlit on :8501; dashboard API URL is env-overridable via
+   `PROCUREAI_API_URL`. Verification ran on the build machine with Docker
+   28.5.1 installed from static binaries. Sandbox limits (documented, not
+   hidden): the VM kernel lacks bridge/iptables NAT modules and the OCI
+   runtime cannot start containers here (setns blocked), so the stack was
+   verified by running each service's exact command natively — real Postgres
+   16.15 + pgvector binaries extracted from the pinned `pgvector/pgvector:pg16`
+   image, the compose `init-db` command verbatim, `uvicorn api.main:app` on
+   :8000, and `streamlit run dashboard/app.py` on :8501 with
+   `PROCUREAI_API_URL=http://localhost:8000`. Proven: extension + 6 tables +
+   8 policies at 384 dims; `/health`, `/metrics`, `/invoices` live; `/audit`
+   returns the honest 503 without a key; dashboard serves HTTP 200 and honors
+   the env override; `retrieve_policy` returns correctly ranked hits
+   (cosine distances ascending). The `Dockerfile`'s apt/pip RUN steps and the
+   compose container wiring itself could not be executed in this sandbox and
+   remain to be confirmed on a normal Docker host; `docker compose config`
+   validates the YAML merge. Two real bugs found by this verification and
+   fixed: (1) `init_db()` created tables before `CREATE EXTENSION vector`
+   (fresh DBs failed with `type "vector" does not exist`) — extension now
+   first; (2) the policies IVFFlat index used `lists=100` on an 8-row table,
+   which made pgvector return zero rows — now `lists=1` with the reason
+   recorded), reviewer setup documentation (includes the §5.3 reference docs).
 6. ~~**LayoutLMv3 behind a feature flag**~~ — **settled** 2026-09-20: honest
    correction instead of a real model. The README and architecture-PDF
    generator no longer claim LayoutLMv3; genuine document-understanding stays

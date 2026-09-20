@@ -103,15 +103,26 @@ class Policy(Base):
 
 
 def init_db():
+    # The vector extension must exist before create_all(), because the
+    # tables declare VECTOR(384) columns. On a fresh database the old
+    # order (tables first, extension second) failed with
+    # 'type "vector" does not exist'.
+    with engine.connect() as conn:
+        conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector;")
+        conn.commit()
     Base.metadata.create_all(bind=engine)
     # Create IVFFlat vector indexes for similarity search
     with engine.connect() as conn:
-        conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector;")
         # Note: IVFFlat requires rows before indexing or can be created with lists=100
+        # Verified live: IVFFlat with lists=100 on the 8-row policies table
+        # makes the planner return ZERO rows for ORDER BY distance LIMIT k
+        # (too many lists for too few rows). lists=1 is correct for a tiny
+        # seed corpus; invoices/vendors keep lists=100 for the 250K-row
+        # design scale (pgvector guidance: lists ~= rows/1000).
         try:
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS vendors_embedding_idx ON vendors USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);")
             conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS invoices_embedding_idx ON invoices USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);")
-            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS policies_embedding_idx ON policies USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);")
+            conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS policies_embedding_idx ON policies USING ivfflat (embedding vector_cosine_ops) WITH (lists = 1);")
             conn.commit()
         except Exception as e:
             print(f"Index creation note (safe if tables empty): {e}")

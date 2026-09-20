@@ -66,7 +66,7 @@ st.set_page_config(
     layout="wide"
 )
 
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = os.getenv("PROCUREAI_API_URL", "http://localhost:8000")
 
 st.title("🛡️ ProcureAI: Enterprise Document AI & Compliance Engine")
 st.markdown("Autonomous AI auditor for invoice fraud detection, purchase order compliance, and vendor risk analysis.")
