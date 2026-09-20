@@ -38,9 +38,9 @@ headline metric or feature is stated without a rerunnable proof or an eval resul
 | FR-4 | Provide a ReAct agent that audits invoices with deterministic tools and emits a structured verdict | ✅ Done — 7 tools: the 5 originals plus `find_similar_invoices` and `retrieve_policy` (pgvector) | `core/agent/agentic_auditor.py`, `core/agent/tools.py`, `core/agent/retrieval.py` |
 | FR-5 | Evaluate the agent on a fixed 30-invoice golden set with an 80% verdict-accuracy gate, where agent errors count as failures | 🟡 In progress — **70.0%** (21/30), CI 52.1%–83.3%, 0 errors | `evals/run_agent_evals.py`, `evals/agent_report.md` |
 | FR-6 | Serve audits through FastAPI REST endpoints and a Streamlit dashboard | ✅ Done 2026-09-20 — `POST /audit` wired to the real `AuditAgent`; Streamlit has an "Agentic Audit" section; honest 503 on LLM failure, `degraded` flag on tool/DB outages | — |
-| FR-7 | Record per-tool/LLM latency, call counts, tokens, and cost | ❌ Planned | Roadmap item 3 |
+| FR-7 | Record per-tool/LLM latency, call counts, tokens, and cost | ✅ Done 2026-09-20 — `trace` object on `POST /audit` and Streamlit summary | Roadmap item 3 |
 | FR-8 | Add historical-invoice similarity + policy retrieval as a 6th agent tool backed by real pgvector | ✅ Done 2026-09-20 (verified vs. live PostgreSQL 16 + pgvector 0.6.0) | §4.3 note below |
-| FR-9 | Provide pytest suite, GitHub Actions CI, Docker Compose, and reviewer setup docs | ❌ Planned | Roadmap item 5 |
+| FR-9 | Provide pytest suite, GitHub Actions CI, Docker Compose, and reviewer setup docs | 🟡 Partial — pytest suite done 2026-09-20 (53 tests, all green); CI, Docker Compose, reviewer docs pending | Roadmap item 5 |
 | FR-10 | Implement genuine LayoutLMv3 document understanding behind an off-by-default feature flag | ❌ Planned | Roadmap item 6 |
 
 ### 2.2 Non-functional requirements
@@ -284,7 +284,11 @@ Sequenced.
    PostgreSQL 16 + pgvector 0.6.0 (see §4.3 note). Open decision: keep retrieval
    optional in the tool sweep, or make it mandatory before the next live eval
    (quota cost tradeoff).
-5. **Engineering rigor** — pytest suite, GitHub Actions CI, Docker Compose,
+5. **Engineering rigor** — pytest suite (**done** 2026-09-20: 53 tests, all
+   green — deterministic tools, XGB scoring incl. the context-enrichment
+   regression test, agent dispatch, trace instrumentation honesty, retrieval
+   graceful degradation, and the `POST /audit` 503-vs-verdict contract; no
+   live Gemini or Postgres in the suite), GitHub Actions CI, Docker Compose,
    reviewer setup documentation (includes the §5.3 reference docs).
 6. ~~**LayoutLMv3 behind a feature flag**~~ — **settled** 2026-09-20: honest
    correction instead of a real model. The README and architecture-PDF
