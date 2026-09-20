@@ -40,7 +40,7 @@ headline metric or feature is stated without a rerunnable proof or an eval resul
 | FR-6 | Serve audits through FastAPI REST endpoints and a Streamlit dashboard | ✅ Done 2026-09-20 — `POST /audit` wired to the real `AuditAgent`; Streamlit has an "Agentic Audit" section; honest 503 on LLM failure, `degraded` flag on tool/DB outages | — |
 | FR-7 | Record per-tool/LLM latency, call counts, tokens, and cost | ✅ Done 2026-09-20 — `trace` object on `POST /audit` and Streamlit summary | Roadmap item 3 |
 | FR-8 | Add historical-invoice similarity + policy retrieval as a 6th agent tool backed by real pgvector | ✅ Done 2026-09-20 (verified vs. live PostgreSQL 16 + pgvector 0.6.0) | §4.3 note below |
-| FR-9 | Provide pytest suite, GitHub Actions CI, Docker Compose, and reviewer setup docs | 🟡 Partial — pytest suite done 2026-09-20 (53 tests, all green); CI, Docker Compose, reviewer docs pending | Roadmap item 5 |
+| FR-9 | Provide pytest suite, GitHub Actions CI, Docker Compose, and reviewer setup docs | 🟡 Partial — pytest suite done 2026-09-20 (53 tests, all green) and GitHub Actions CI done 2026-09-20 (install → compileall → secret scan → pytest on push/PR); Docker Compose and reviewer docs pending | Roadmap item 5 |
 | FR-10 | Implement genuine LayoutLMv3 document understanding behind an off-by-default feature flag | ❌ Planned | Roadmap item 6 |
 
 ### 2.2 Non-functional requirements
@@ -288,7 +288,10 @@ Sequenced.
    green — deterministic tools, XGB scoring incl. the context-enrichment
    regression test, agent dispatch, trace instrumentation honesty, retrieval
    graceful degradation, and the `POST /audit` 503-vs-verdict contract; no
-   live Gemini or Postgres in the suite), GitHub Actions CI, Docker Compose,
+   live Gemini or Postgres in the suite), GitHub Actions CI (**done**
+   2026-09-20: `.github/workflows/ci.yml` runs install → compileall →
+   `scripts/ci_secret_scan.sh` → pytest on push/PR to `ai-engineer-upgrade`
+   and `main`; the scan was proven against a planted token), Docker Compose,
    reviewer setup documentation (includes the §5.3 reference docs).
 6. ~~**LayoutLMv3 behind a feature flag**~~ — **settled** 2026-09-20: honest
    correction instead of a real model. The README and architecture-PDF
