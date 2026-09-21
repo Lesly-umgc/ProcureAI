@@ -165,7 +165,19 @@ structured invoice ──(FR-1 ✅)──► scripts/synthesize.py (shared deter
 | 2 | Verdict rubric hardened; line items + vendor-master fields passed to agent; per-line price-drift checks; vendor/tax-ID verification | 66.7% (20/30), CI 48.8%–80.8% | 0.700 | 0 | FAIL |
 | 3 | Fixed real `verify_arithmetic` line-sum defect; duplicate originals added to history; clean/near-threshold/split-billing verdict guards | 70.0% (21/30), CI 52.1%–83.3% | 0.822 | 0 | FAIL |
 | 4 | Duplicates & split-billing → `FLAG` (heuristic ≠ certain fraud); all five tool calls mandatory before verdict | *aborted — quota* | — | 27 | — |
-| 4 (retry) | Same agent code; rerun after Gemini free-tier daily quota reset | *scheduled 2026-09-21 ~05:42 EDT* | — | — | — |
+| 4 (rerun) | **Same agent code; rerun after quota reset. First fair eval with the corrected `score_invoice_xgb` dispatch (runs 1–3 ran with the XGBoost tool raising TypeError on every call)** | **93.3% (28/30), CI 78.7%–98.2%** | 0.900 | 0 | **PASS** |
+
+Run 4 rerun note (2026-09-21 07:01 UTC, live): this is the **first canonical
+corrected-tool run** — runs 1–3 remain honest history but measured a
+handicapped agent whose XGBoost tool raised on every call (fixed in
+`score_invoice_xgb` before this run). Same Gemini model and prompts as before;
+verdict accuracy **93.3% (28/30; 95% Wilson CI 78.7%–98.2%)**, mean findings
+recall **0.900**, 0 agent errors — **PASS** against the 80% gate. Both misses
+were false positives on NORMAL invoices (`INV-3002`, `INV-3003`: expected
+APPROVE, got FLAG); NORMAL accuracy 60% (3/5). Fraud-category verdict
+accuracy was 100% for CALC_DISCREPANCY, DUPLICATE, GHOST, PRICE_DRIFT and
+SPLIT_PO. Duplicate findings recall remains weaker at 0.600. Matched artifact
+pair: `evals/agent_report.md` + `evals/agent_results.json` (30 rows).
 
 Run 4 note (2026-09-20 15:36 EDT): the live run died on **API quota, not agent
 quality** — `gemini-3.5-flash-lite` returned HTTP 429 (quota exceeded) after 3
@@ -250,9 +262,11 @@ Proven, rerunnable numbers (not marketing copy):
   (`proofs/prove_accuracy.py`).
 - **99.87%** audit-preparation time reduction, automated wall-clock vs. a
   documented 4-minute manual baseline (`proofs/prove_efficiency.py`).
-- An **agentic auditor** (ReAct + 5 deterministic tools) under active calibration:
-  60.0% → 66.7% → 70.0% verdict accuracy across three live runs, chasing an 80%
-  gate — reported win or lose.
+- An **agentic auditor** (ReAct + 5 deterministic tools), calibrated live:
+  60.0% → 66.7% → 70.0% across three runs, then **93.3% (28/30; 95% Wilson CI
+  78.7%–98.2%)** on run 4 (2026-09-21) — the first fair eval with the
+  corrected `score_invoice_xgb` tool — **passing the 80% gate**; reported
+  win or lose.
 
 Position vs. alternatives: unlike single-prompt "AI auditors" (our own legacy
 baseline scores 56.7%), ProcureAI separates deterministic verification (code)
@@ -268,9 +282,13 @@ Sequenced.
 
 1. **Finish the eval loop** — *parked per user direction 2026-09-20 ("come back
    later")*: pass the 80% verdict-accuracy gate on the live agent, or reach a
-   documented honest stop with remaining misses analyzed. Run-4 retry is
-   scheduled for 2026-09-21 ~05:42 EDT after the free-tier quota reset; the
-   70.0% run-3 result stands as the current honest number until then.
+   documented honest stop with remaining misses analyzed. Run-4 rerun
+   (2026-09-21, first fair eval with the corrected `score_invoice_xgb` tool)
+   scored **93.3% (28/30; 95% Wilson CI 78.7%–98.2%)** — **gate PASSED**.
+   Remaining work: reduce the two NORMAL false positives (`INV-3002`,
+   `INV-3003`) without harming fraud recall, and remove evaluator-label
+   leakage (`duplicate_of` fixture construction) before calling this a
+   final number.
 2. ~~**Integrate `AuditAgent` into FastAPI and Streamlit**~~ — **done** 2026-09-20:
    `POST /audit` returns verdict/findings/evidence/degraded state; Streamlit has an
    "Agentic Audit" section. Also fixed the `score_invoice_xgb` `TypeError` (tool had
@@ -358,8 +376,10 @@ commits.
   implemented real DUPLICATE + GHOST fraud; tuned XGBoost (500t/d6/lr0.05).
 - Built eval harness (golden set, judge, hardened runner) and legacy 56.7% baseline.
 - Built ReAct agent + 5 deterministic tools on Gemini 3.5 Flash Lite.
-- Calibration runs: 60.0% → 66.7% → 70.0% vs. 80% gate (run 4 aborted on API quota;
-  retry scheduled 2026-09-21 ~05:42 EDT; gate parked per user direction).
+- Calibration runs: 60.0% → 66.7% → 70.0% vs. 80% gate; run 4 rerun (2026-09-21,
+  first fair eval with the corrected `score_invoice_xgb` tool) reached **93.3%
+  (28/30)** — gate PASSED. (Runs 1–3 ran with the XGBoost tool raising
+  TypeError on every call.)
 - Wrote architecture before/after diagrams.
 - Implemented FR-8: real pgvector tools (`find_similar_invoices`, `retrieve_policy`)
   as optional 6th/7th agent tools, verified end-to-end against live PostgreSQL 16 +
