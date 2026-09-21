@@ -107,6 +107,15 @@ def init_db():
     # tables declare VECTOR(384) columns. On a fresh database the old
     # order (tables first, extension second) failed with
     # 'type "vector" does not exist'.
+    #
+    # PRIVILEGE SPLIT (verified 2026-09-21): creating the extension needs
+    # superuser, so in the Compose stack it is created by the privileged
+    # first-boot hook docker/db-init/01-procureai.sh, and the app role is
+    # a non-superuser. When the extension already exists, the statement
+    # below is a no-op that requires NO special privilege. On a truly
+    # fresh database reached directly as a non-superuser it fails loudly
+    # with "Must be superuser to create this extension" — that is the
+    # honest signal that the privileged init step was skipped.
     with engine.connect() as conn:
         conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector;")
         conn.commit()

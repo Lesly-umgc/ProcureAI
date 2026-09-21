@@ -317,7 +317,28 @@ Sequenced.
    (fresh DBs failed with `type "vector" does not exist`) — extension now
    first; (2) the policies IVFFlat index used `lists=100` on an 8-row table,
    which made pgvector return zero rows — now `lists=1` with the reason
-   recorded), reviewer setup documentation (includes the §5.3 reference docs).
+   recorded.
+   Privilege correction (2026-09-21, honest erratum): the 2026-09-20
+   verification passed only because the application role had been made a
+   Postgres SUPERUSER (both in the compose design — `POSTGRES_USER:
+   procureai` makes the app role superuser in the official image — and in
+   the local retest). Least-privilege first boot was therefore NOT proven.
+   Fixed: the `db` service now boots as the stock `postgres` superuser,
+   which exists solely to run `docker/db-init/01-procureai.sh` once from
+   `/docker-entrypoint-initdb.d`; that hook creates a NON-SUPERUSER
+   `procureai` role (`NOSUPERUSER NOCREATEDB NOCREATEROLE`), a
+   `procureai_db` database owned by it, and the `vector` extension
+   (superuser-only). All app services connect as the unprivileged role.
+   Re-verified 2026-09-21 from a scratch database, running the actual hook
+   file: role confirmed `rolsuper=false`; negative control — `init_db()`
+   as the app role on a DB without the extension fails loudly with
+   `permission denied to create extension "vector"` (proving the hook is
+   load-bearing, not the role); positive path — `init_db()` + policy seed
+   succeed as the non-superuser role (extension statement is a no-op),
+   yielding 6 app-owned tables, 8 policies at 384 dims, correct retrieval
+   ranking, live `/health` + `/metrics`, and the honest `/audit` 503;
+   53/53 pytest green, compile + secret scan clean, `docker compose config`
+   valid), reviewer setup documentation (includes the §5.3 reference docs).
 6. ~~**LayoutLMv3 behind a feature flag**~~ — **settled** 2026-09-20: honest
    correction instead of a real model. The README and architecture-PDF
    generator no longer claim LayoutLMv3; genuine document-understanding stays
